@@ -5,11 +5,9 @@
 // License: Mozilla Public License v2.0 (MPL v2.0)
 
 use hashbrown::HashSet;
-use std::time::Instant;
+use lingua::{Language, LanguageDetectorBuilder};
+//use std::time::Instant;
 use unicode_segmentation::{UnicodeSegmentation, UnicodeWords};
-use whatlang::{
-    detect as lang_detect_all, detect_lang as lang_detect, detect_script as script_detect, Lang,
-};
 
 #[cfg(feature = "tokenizer-chinese")]
 use std::vec::IntoIter;
@@ -22,14 +20,14 @@ pub struct TokenLexerBuilder;
 
 pub struct TokenLexer<'a> {
     mode: TokenLexerMode,
-    locale: Option<Lang>,
+    locale: Option<Language>,
     words: TokenLexerWords<'a>,
     yields: HashSet<StoreTermHashed>,
 }
 
 #[derive(PartialEq)]
 pub enum TokenLexerMode {
-    NormalizeAndCleanup(Option<Lang>),
+    NormalizeAndCleanup(Option<Language>),
     NormalizeOnly,
 }
 
@@ -44,8 +42,8 @@ enum TokenLexerWords<'a> {
 }
 
 const TEXT_LANG_TRUNCATE_OVER_CHARS: usize = 200;
-const TEXT_LANG_DETECT_PROCEED_OVER_CHARS: usize = 20;
-const TEXT_LANG_DETECT_NGRAM_UNDER_CHARS: usize = 60;
+// const TEXT_LANG_DETECT_PROCEED_OVER_CHARS: usize = 20;
+// const TEXT_LANG_DETECT_NGRAM_UNDER_CHARS: usize = 60;
 
 #[cfg(feature = "tokenizer-chinese")]
 lazy_static! {
@@ -95,13 +93,7 @@ impl TokenLexerBuilder {
         Ok(TokenLexer::new(mode, text, locale))
     }
 
-    fn detect_lang(text: &str) -> Option<Lang> {
-        // Detect only if text is long-enough to allow the text locale detection system to \
-        //   function properly
-        if text.len() < TEXT_LANG_DETECT_PROCEED_OVER_CHARS {
-            return None;
-        }
-
+    fn detect_lang(text: &str) -> Option<Language> {
         // Truncate text if necessary, as to avoid the ngram or stopwords detector to be \
         //   ran on more words than those that are enough to reliably detect a locale.
         let safe_text = if text.len() > TEXT_LANG_TRUNCATE_OVER_CHARS {
@@ -140,119 +132,23 @@ impl TokenLexerBuilder {
         //   an attempt to extract the locale using trigrams. Still, if either of these methods \
         //   fails at detecting a locale it will try using the other method in fallback as to \
         //   produce the most reliable result while minimizing CPU cycles.
-        if safe_text.len() < TEXT_LANG_DETECT_NGRAM_UNDER_CHARS {
-            debug!(
-                "lexer text is shorter than {} characters, using the slow method",
-                TEXT_LANG_DETECT_NGRAM_UNDER_CHARS
-            );
+        let detector = LanguageDetectorBuilder::from_all_languages().build();
+        let detected_language = detector.detect_language_of(safe_text);
 
-            Self::detect_lang_slow(safe_text)
-        } else {
-            debug!(
-                "lexer text is equal or longer than {} characters, using the fast method",
-                TEXT_LANG_DETECT_NGRAM_UNDER_CHARS
-            );
-
-            Self::detect_lang_fast(safe_text)
-        }
-    }
-
-    fn detect_lang_slow(safe_text: &str) -> Option<Lang> {
-        let ngram_start = Instant::now();
-
-        match lang_detect_all(safe_text) {
-            Some(detector) => {
-                let ngram_took = ngram_start.elapsed();
-
-                let mut locale = detector.lang();
-
-                info!(
-                    "[slow lexer] locale detected from text: {} ({} from {} at {}/1; {}s + {}ms)",
-                    safe_text,
-                    locale,
-                    detector.script(),
-                    detector.confidence(),
-                    ngram_took.as_secs(),
-                    ngram_took.subsec_millis()
-                );
-
-                // Confidence is low, try to detect locale from stop-words.
-                // Notice: this is a fallback but should not be too reliable for short \
-                //   texts.
-                if !detector.is_reliable() {
-                    debug!("[slow lexer] trying to detect locale from stopwords instead");
-
-                    // Better alternate locale found?
-                    if let Some(alternate_locale) =
-                        LexerStopWord::guess_lang(safe_text, detector.script())
-                    {
-                        info!(
-                            "[slow lexer] detected more accurate locale from stopwords: {}",
-                            alternate_locale
-                        );
-
-                        locale = alternate_locale;
-                    }
-                }
-
-                Some(locale)
-            }
-            None => {
-                info!(
-                    "[slow lexer] no locale could be detected from text: {}",
-                    safe_text
-                );
-
-                None
-            }
-        }
-    }
-
-    fn detect_lang_fast(safe_text: &str) -> Option<Lang> {
-        let stopwords_start = Instant::now();
-
-        match script_detect(safe_text) {
-            Some(script) => {
-                // Locale found?
-                if let Some(locale) = LexerStopWord::guess_lang(safe_text, script) {
-                    let stopwords_took = stopwords_start.elapsed();
-
-                    info!(
-                        "[fast lexer] locale detected from text: {} ({}; {}s + {}ms)",
-                        safe_text,
-                        locale,
-                        stopwords_took.as_secs(),
-                        stopwords_took.subsec_millis()
-                    );
-
-                    Some(locale)
-                } else {
-                    debug!("[fast lexer] trying to detect locale from fallback ngram instead");
-
-                    // No locale found, fallback on slow ngram.
-                    lang_detect(safe_text)
-                }
-            }
-            None => {
-                info!(
-                    "[fast lexer] no script could be detected from text: {}",
-                    safe_text
-                );
-
-                None
-            }
-        }
+        detected_language
     }
 }
 
 impl<'a> TokenLexer<'a> {
-    fn new(mode: TokenLexerMode, text: &'a str, locale: Option<Lang>) -> TokenLexer<'a> {
+    fn new(mode: TokenLexerMode, text: &'a str, locale: Option<Language>) -> TokenLexer<'a> {
         // Tokenize words (depending on the locale)
         let words = match locale {
             #[cfg(feature = "tokenizer-chinese")]
-            Some(Lang::Cmn) => TokenLexerWords::JieBa(TOKENIZER_JIEBA.cut(text, false).into_iter()),
+            Some(Language::Chinese) => {
+                TokenLexerWords::JieBa(TOKENIZER_JIEBA.cut(text, false).into_iter())
+            }
             #[cfg(feature = "tokenizer-japanese")]
-            Some(Lang::Jpn) => match TOKENIZER_LINDERA.tokenize(text) {
+            Some(Language::Japanese) => match TOKENIZER_LINDERA.tokenize(text) {
                 Ok(tokens) => TokenLexerWords::Lindera(tokens.into_iter()),
                 Err(err) => {
                     warn!("unable to tokenize japanese, falling back: {}", err);
@@ -370,7 +266,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(token_cleaner.locale, Some(Lang::Eng));
+        assert_eq!(token_cleaner.locale, Some(Language::English));
         assert_eq!(
             token_cleaner.next(),
             Some(("quick".to_string(), 4179131656))
@@ -394,7 +290,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(token_cleaner.locale, Some(Lang::Fra));
+        assert_eq!(token_cleaner.locale, Some(Language::French));
         assert_eq!(
             token_cleaner.next(),
             Some(("renard".to_string(), 1635186311))
@@ -424,7 +320,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(token_cleaner.locale, Some(Lang::Cmn));
+        assert_eq!(token_cleaner.locale, Some(Language::Chinese));
         assert_eq!(token_cleaner.next(), Some(("出".to_string(), 241978070)));
         assert_eq!(token_cleaner.next(), Some(("一个".to_string(), 2596274530)));
         assert_eq!(token_cleaner.next(), Some(("叛徒".to_string(), 3244183759)));
@@ -440,7 +336,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(token_cleaner.locale, Some(Lang::Cmn));
+        assert_eq!(token_cleaner.locale, Some(Language::Chinese));
         assert_eq!(token_cleaner.next(), Some(("快".to_string(), 126546256)));
         assert_eq!(token_cleaner.next(), Some(("狐".to_string(), 2879689662)));
         assert_eq!(token_cleaner.next(), Some(("跨".to_string(), 2913342670)));
@@ -458,7 +354,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(token_cleaner.locale, Some(Lang::Jpn));
+        assert_eq!(token_cleaner.locale, Some(Language::Japanese));
         assert_eq!(token_cleaner.next(), Some(("関西".to_string(), 1283572620)));
         assert_eq!(token_cleaner.next(), Some(("国際".to_string(), 2132457693)));
         assert_eq!(token_cleaner.next(), Some(("空港".to_string(), 865668138)));
@@ -498,7 +394,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(token_cleaner.locale, Some(Lang::Jpn));
+        assert_eq!(token_cleaner.locale, Some(Language::Japanese));
         assert_eq!(token_cleaner.next(), Some(("𠮷".to_string(), 2866455824)));
         assert_eq!(token_cleaner.next(), Some(("野家".to_string(), 1324395598)));
         assert_eq!(
@@ -526,18 +422,18 @@ mod tests {
     #[test]
     fn it_cleans_token_lang_hinted() {
         let mut token_cleaner_right = TokenLexerBuilder::from(
-            TokenLexerMode::NormalizeAndCleanup(Some(Lang::Eng)),
+            TokenLexerMode::NormalizeAndCleanup(Some(Language::English)),
             "This will be cleaned properly, as English was hinted rightfully so.",
         )
         .unwrap();
         let mut token_cleaner_wrong = TokenLexerBuilder::from(
-            TokenLexerMode::NormalizeAndCleanup(Some(Lang::Fra)),
+            TokenLexerMode::NormalizeAndCleanup(Some(Language::French)),
             "This will not be cleaned properly, as French was hinted but this is English.",
         )
         .unwrap();
 
-        assert_eq!(token_cleaner_right.locale, Some(Lang::Eng));
-        assert_eq!(token_cleaner_wrong.locale, Some(Lang::Fra));
+        assert_eq!(token_cleaner_right.locale, Some(Language::English));
+        assert_eq!(token_cleaner_wrong.locale, Some(Language::French));
 
         assert_eq!(
             token_cleaner_right.next(),
@@ -553,7 +449,7 @@ mod tests {
     fn it_detects_lang_english_regular() {
         assert_eq!(
             TokenLexerBuilder::detect_lang("The quick brown fox jumps over the lazy dog!"),
-            Some(Lang::Eng)
+            Some(Language::English)
         );
     }
 
@@ -567,13 +463,16 @@ mod tests {
             be useful — but now scientists have figured out how to skip the process altogether and
             convert seawater into usable hydrogen"#
             ),
-            Some(Lang::Eng)
+            Some(Language::English)
         );
     }
 
     #[test]
-    fn it_doesnt_detect_lang_english_tiny() {
-        assert_eq!(TokenLexerBuilder::detect_lang("The quick"), None);
+    fn it_detects_lang_english_tiny() {
+        assert_eq!(
+            TokenLexerBuilder::detect_lang("The quick"),
+            Some(Language::English)
+        );
     }
 }
 

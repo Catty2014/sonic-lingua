@@ -9,7 +9,10 @@ homepage = "https://github.com/valeriansaliou/sonic"
 repository = "https://github.com/valeriansaliou/sonic.git"
 keywords = ["search", "query", "server", "index"]
 categories = ["database-implementations", "web-programming"]
-authors = ["Valerian Saliou <valerian@valeriansaliou.name>", "Baptiste Jamin <baptistejamin@gmail.com>"]
+authors = [
+    "Valerian Saliou <valerian@valeriansaliou.name>",
+    "Baptiste Jamin <baptistejamin@gmail.com>",
+]
 
 [[bin]]
 name = "sonic"
@@ -36,10 +39,13 @@ byteorder = "1.4"
 hashbrown = "0.14"
 linked_hash_set = "0.1"
 whatlang = "0.16"
+lingua = "1.6.2"
 regex = "1.6"
 jieba-rs = { version = "0.7", optional = true }
 lindera-core = { version = "0.31", optional = true }
-lindera-dictionary = { version = "0.31", features = ["unidic"], optional = true }
+lindera-dictionary = { version = "0.31", features = [
+    "unidic",
+], optional = true }
 lindera-tokenizer = { version = "0.31", features = ["unidic"], optional = true }
 
 [target.'cfg(unix)'.dependencies]

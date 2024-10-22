@@ -4,11 +4,12 @@
 // Copyright: 2019, Valerian Saliou <valerian@valeriansaliou.name>
 // License: Mozilla Public License v2.0 (MPL v2.0)
 
-use whatlang::Lang;
+use lingua::{IsoCode639_3, Language};
+use std::str::FromStr;
 
 #[derive(Debug, PartialEq)]
 pub enum QueryGenericLang {
-    Enabled(Lang),
+    Enabled(Language),
     Disabled,
 }
 
@@ -29,7 +30,12 @@ impl QueryGenericLang {
         if value == "none" {
             Some(QueryGenericLang::Disabled)
         } else {
-            Lang::from_code(value).map(QueryGenericLang::Enabled)
+            let _isocode = IsoCode639_3::from_str(value);
+            if _isocode.is_err() {
+                return None;
+            }
+            let language = Language::from_iso_code_639_3(&_isocode.unwrap());
+            Some(QueryGenericLang::Enabled(language))
         }
     }
 }
@@ -46,7 +52,7 @@ mod tests {
         );
         assert_eq!(
             QueryGenericLang::from_value("fra"),
-            Some(QueryGenericLang::Enabled(Lang::Fra))
+            Some(QueryGenericLang::Enabled(Language::French))
         );
         assert_eq!(QueryGenericLang::from_value("xxx"), None);
     }
